@@ -1,10 +1,11 @@
 # anomaly_impact_alert
+<img src="docs/logo.png" alt="logo" width="200">
 
-**Anomaly Impact Alert** — a lightweight Python toolkit for **detecting anomalies**, **forecasting metrics**, **explaining deviations**, and **sending alerts** (e.g. via Telegram).
+**Anomaly Impact Alert** — a lightweight Python toolkit for **detecting anomalies**, **forecasting metrics**, **explaining deviations**, and **sending alerts** (e.g. via Telegram)
 
 ---
 
-## 🎯 Purpose
+## Purpose
 This library helps analytics and monitoring teams automatically:
 - Detect abnormal metric values in time-series data
 - Forecast expected ranges (with confidence intervals)
@@ -18,16 +19,17 @@ This library helps analytics and monitoring teams automatically:
 ### Detection visualization
 Shows detected anomalies (red dots), confidence intervals, and model outputs:
 
-![Anomaly Detection](docs/example_detection.png)
+<img src="docs/example_detection.png" alt="Anomaly Detection]" width="900">
+
 
 ### Telegram alert
 Example of an automatically formatted alert with top contributing segments:
 
-![Telegram Alert](docs/example_telegram.png)
+<img src="docs/example_telegram.png" alt="Telegram Alert" width="400">
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ```bash
 pip install anomaly_impact_alert
@@ -77,4 +79,4 @@ send_alert_for_date(text, alert_cfg)
 ---
 
 ## 🧾 License
-MIT © 2025 Aleksey Voronko
+MIT © 2025 Aleksey Voronko, Petr Devitsin
