@@ -62,7 +62,7 @@ send_alert_for_date(text, alert_cfg)
 
 ---
 
-## 📦 Modules Overview
+## Modules Overview
 
 | Module | Description |
 |--------|--------------|
@@ -73,10 +73,10 @@ send_alert_for_date(text, alert_cfg)
 
 ---
 
-## ⚙️ Dependencies
+## Dependencies
 `pandas`, `numpy`, `scikit-learn`, `matplotlib`, `prophet`, `tqdm`, `requests`, `python-telegram-bot`
 
 ---
 
-## 🧾 License
+## License
 MIT © 2025 Aleksey Voronko, Petr Devitsin
