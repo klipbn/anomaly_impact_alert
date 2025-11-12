@@ -14,7 +14,7 @@ This library helps analytics and monitoring teams automatically:
 
 ---
 
-## 📊 Example Output
+## Example Output
 
 ### Detection visualization
 Shows detected anomalies (red dots), confidence intervals, and model outputs:
