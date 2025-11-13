@@ -14,6 +14,25 @@ This library helps analytics and monitoring teams automatically:
 
 ---
 
+## Demo Notebook
+**Anomaly Impact Alert** is a lightweight Python toolkit for:  
+- **Anomaly detection** (Z-Score, CI, STL, SESD, LOF, Isolation Forest, and more)  
+- **Forecasting metrics** (Prophet, ETS, STL ensemble)  
+- **Explaining deviations** (impact decomposition by segments)  
+- **Sending alerts** (e.g., via Telegram)
+
+This notebook demonstrates how to use **anomaly_impact_alert** in practice:  
+- Data preparation  
+- Anomaly detection workflow  
+- Time-series forecasting  
+- Contribution analysis across segments  
+- Automated alert generation and explanations  
+
+ **Try it in Google Colab:**  👉 [Open in Colab](https://colab.research.google.com/drive/117E7v4KhX6wqLylcK-1g47Ee_pnNCHYd)
+
+
+---
+
 ## Example Output
 
 ### Detection visualization
@@ -35,30 +54,8 @@ Example of an automatically formatted alert with top contributing segments:
 pip install anomaly_impact_alert
 ```
 
-```python
-from anomaly_impact_alert import (
-    AnomalyParams, analyze_latest_point,
-    ImpactConfig, attach_impact_text,
-    BFConfig, forecast_values_for_targets_better,
-    AlertConfig, send_alert_for_date,
-)
+**Try it in Google Colab:**  👉 [Open in Colab](https://colab.research.google.com/drive/117E7v4KhX6wqLylcK-1g47Ee_pnNCHYd)
 
-# Detect anomalies
-params = AnomalyParams(threshold=3.0)
-anomalies = analyze_latest_point(df, params)
-
-# Forecast expected values
-forecast_cfg = BFConfig(periods=7)
-forecast = forecast_values_for_targets_better(df, forecast_cfg)
-
-# Explain the impact
-impact_cfg = ImpactConfig(metric="amount")
-text = attach_impact_text(anomalies, impact_cfg)
-
-# Send alert to Telegram
-alert_cfg = AlertConfig(bot_token="YOUR_BOT_TOKEN", chat_id="YOUR_CHAT_ID")
-send_alert_for_date(text, alert_cfg)
-```
 
 ---
 
