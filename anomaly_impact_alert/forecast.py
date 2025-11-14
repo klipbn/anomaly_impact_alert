@@ -148,7 +148,7 @@ def _make_holidays(df_hist: pd.DataFrame, country: str) -> Optional[pd.DataFrame
 # Модели: Prophet / STL+ETS
 
 def _prophet_one(hist: pd.DataFrame, tgt: pd.Timestamp, cfg: BFConfig) -> float:
-    """Prophet 1-step, учится на ds<tgt."""
+    """Prophet 1-step, учится на ds<tgt"""
     df = hist.copy()
     use_log, eps = _need_log(df["y"], cfg)
     if use_log:
@@ -180,7 +180,7 @@ def _prophet_one(hist: pd.DataFrame, tgt: pd.Timestamp, cfg: BFConfig) -> float:
     return yhat
 
 def _stl_ets_one(hist: pd.DataFrame, tgt: pd.Timestamp, cfg: BFConfig) -> float:
-    """STL + ETS 1-step, на ds<tgt."""
+    """STL + ETS 1-step, на ds<tgt"""
     y = hist["y"].astype(float).values
     seasonal_periods = 24 if cfg.granularity == "hourly" else 7
 
