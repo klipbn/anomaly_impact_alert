@@ -12,6 +12,7 @@
 ---
 
 ## Purpose
+
 This library helps analytics and monitoring teams automatically:
 - Detect abnormal metric values in time-series data
 - Forecast expected ranges (with confidence intervals)
@@ -21,6 +22,7 @@ This library helps analytics and monitoring teams automatically:
 ---
 
 ## Demo Notebook
+
 **Anomaly Impact Alert** is a lightweight Python toolkit for:  
 - **Anomaly detection** (Z-Score, CI, STL, SESD, LOF, Isolation Forest, and more)  
 - **Forecasting metrics** (Prophet, ETS, STL ensemble)  
