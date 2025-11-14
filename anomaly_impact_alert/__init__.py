@@ -15,4 +15,4 @@ __all__ = [
     "send_alert_for_date",
 ]
 
-__version__ = "0.4.2"
+__version__ = "0.4.4"

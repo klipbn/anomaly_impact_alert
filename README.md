@@ -84,4 +84,4 @@ pip install anomaly_impact_alert
 ---
 
 ## License
-MIT © 2025 Aleksey Voronko
+MIT © 2025 Alexey Voronko

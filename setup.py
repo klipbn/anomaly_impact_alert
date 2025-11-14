@@ -2,11 +2,11 @@ from setuptools import setup, find_packages
 
 setup(
     name="anomaly_impact_alert",
-    version="0.4.2",
+    version="0.4.4",
     description="Anomaly detection, impact explanation, forecasting, and alerting toolkit",
     long_description=open("README.md", encoding="utf-8").read(),
     long_description_content_type="text/markdown",
-    author="Aleksey Voronko",
+    author="Alexey Voronko",
     license="MIT",
     packages=find_packages(),
     python_requires=">=3.9",
