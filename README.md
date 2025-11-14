@@ -1,5 +1,11 @@
 # anomaly_impact_alert
-<img src="docs/logo.png" alt="logo" width="200">
+![PyPI](https://img.shields.io/pypi/v/anomaly_impact_alert.svg)
+![Python](https://img.shields.io/badge/python-3.9%2B-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+
+<p align="center">
+  <img src="docs/logo.png" alt="logo" width="200">
+</p>
 
 **Anomaly Impact Alert** — a lightweight Python toolkit for **detecting anomalies**, **forecasting metrics**, **explaining deviations**, and **sending alerts** (e.g. via Telegram)
 
