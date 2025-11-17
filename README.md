@@ -1,4 +1,4 @@
-# anomaly_impact_alert
+# Anomaly Impact Alert
 ![PyPI](https://img.shields.io/pypi/v/anomaly_impact_alert.svg)
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
