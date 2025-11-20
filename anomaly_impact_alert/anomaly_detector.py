@@ -100,7 +100,9 @@ def seasonal_esd_full(
         if hybrid:
             median = np.median(arr)
             mad = np.median(np.abs(arr - median)) or 1e-9
-            return (arr - median) / mad
+            sigma = mad * 1.4826  # привести MAD к оценке sigma
+            return (arr - median) / sigma
+            # или: return 0.6745 * (arr - median) / mad
         return stats.zscore(arr, ddof=1, nan_policy='omit')
 
     def get_seasonal_residual(data):
