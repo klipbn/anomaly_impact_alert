@@ -61,12 +61,12 @@ class AlertConfig:
 
     # ссылки (HTML)
     links: Optional[List[Tuple[str, str]]] = (
-        ("Дашборд по аномалиям", "https://superset.vk.team/superset/dashboard/6134"),
-        ("Дашборд по факторному анализу", "https://superset.vk.team/superset/dashboard/5109/"),
+        ("Дашборд по аномалиям", "https://"),
+        ("Дашборд по факторному анализу", "https:"),
     )
 
     # API VK Teams
-    vkteams_api_url: str = "https://api.internal.myteam.mail.ru/bot/v1"
+    vkteams_api_url: str = "https://api"
 
     # отправлять только если аномалия
     anomaly_only: bool = True
