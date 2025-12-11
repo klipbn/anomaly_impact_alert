@@ -15,7 +15,7 @@ import matplotlib.dates as mdates
 import matplotlib.ticker as mticker
 
 @dataclass
-class AlertConfig:
+class AlertConfig_tg:
     # имена колонок во входном df
     time_col: str = "time_at"
     value_col: str = "metric_value"
@@ -99,7 +99,7 @@ def _pick_row_for_now(df: pd.DataFrame, now: datetime, tcol: str) -> pd.DataFram
     return pd.DataFrame()
 
 
-def make_plot_image(df: pd.DataFrame, now: pd.Timestamp, metric_name: str, cfg: AlertConfig) -> str:
+def make_plot_image(df: pd.DataFrame, now: pd.Timestamp, metric_name: str, cfg: AlertConfig_tg) -> str:
     t, v = cfg.time_col, cfg.value_col
     cols = [c for c in ["ci_upper", "ci_lower", "ci_mean", cfg.anomaly_col] if c in df.columns]
 
@@ -146,7 +146,7 @@ def make_plot_image(df: pd.DataFrame, now: pd.Timestamp, metric_name: str, cfg: 
     plt.close(fig)
     return tmp.name
 
-def _find_prev_values(df: pd.DataFrame, now: pd.Timestamp, cfg: AlertConfig) -> Tuple[Optional[float], Optional[float]]:
+def _find_prev_values(df: pd.DataFrame, now: pd.Timestamp, cfg: AlertConfig_tg) -> Tuple[Optional[float], Optional[float]]:
     t, v, gcol = cfg.time_col, cfg.value_col, cfg.granularity_col
     gran = df.loc[df[t] == now, gcol].iloc[0] if gcol in df.columns and (df[t] == now).any() else "daily"
     if gran == "hourly":
@@ -161,7 +161,7 @@ def _find_prev_values(df: pd.DataFrame, now: pd.Timestamp, cfg: AlertConfig) -> 
             float(v7.iloc[0]) if not v7.empty else None)
 
 
-def _resolve_forecast_from_row(row: pd.Series, cfg: AlertConfig) -> Optional[float]:
+def _resolve_forecast_from_row(row: pd.Series, cfg: AlertConfig_tg) -> Optional[float]:
     fcol = cfg.forecast_col
     if fcol and fcol in row.index and pd.notna(row[fcol]):
         try:
@@ -190,7 +190,7 @@ def _resolve_forecast_from_row(row: pd.Series, cfg: AlertConfig) -> Optional[flo
     return None
 
 
-def build_caption(alert_row: pd.Series, cfg: AlertConfig) -> str:
+def build_caption(alert_row: pd.Series, cfg: AlertConfig_tg) -> str:
     now = pd.to_datetime(alert_row[cfg.time_col])
     metric_name = str(alert_row.get(cfg.metric_name_col, "metric"))
     val_now = float(str(alert_row[cfg.value_col]).replace(" ", "").replace(",", "")) \
@@ -275,15 +275,15 @@ def send_telegram_message(
     except Exception:
         return {"ok": False, "status_code": getattr(resp, "status_code", None), "text": getattr(resp, "text", "")}
 
-def send_alert_for_date(
+def send_alert_for_date_tg(
     df_final: pd.DataFrame,
     now: datetime,
     *,
     metric_name: Optional[str] = None,
     token: Optional[str] = None,
     chat_id: Optional[str] = None,
-    cfg: Optional[AlertConfig] = None,
-    plot_func: Optional[Callable[[pd.DataFrame, pd.Timestamp, str, AlertConfig], str]] = None,
+    cfg: Optional[AlertConfig_tg] = None,
+    plot_func: Optional[Callable[[pd.DataFrame, pd.Timestamp, str, AlertConfig_tg], str]] = None,
     also_return: bool = False,
 ) -> Optional[dict]:
     """
@@ -293,7 +293,7 @@ def send_alert_for_date(
     Возвращает payload Telegram (или dict с caption+image_path при also_return=True),
     либо None, если на дату нет строки/аномалии
     """
-    cfg = cfg or AlertConfig()
+    cfg = cfg or AlertConfig_tg()
     t, v, a, mcol, gcol = cfg.time_col, cfg.value_col, cfg.anomaly_col, cfg.metric_name_col, cfg.granularity_col
 
     df = df_final.copy()

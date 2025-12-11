@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from typing import Iterable, Optional, Sequence, Tuple
+from datetime import timedelta
+from typing import Optional, Sequence, Tuple, List
 
 import numpy as np
 import pandas as pd
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import os
 
 
 @dataclass
@@ -17,9 +15,7 @@ class ImpactConfig:
     metric_col: str = "metric_value"
     window_days: int = 5
     top_k: int = 3
-    exclude_groups: Tuple[str, ...] = ("total", "-")
-    parallel: bool = True
-    max_workers: Optional[int] = None
+    exclude_groups: Tuple[str, ...] = ("total", "-")  # кого выкидывать из групп
 
 
 def _fmt_num(x: float) -> str:
@@ -56,19 +52,29 @@ def _compute_impact_for_date(
 
     df_now = (
         work[work[t] == now]
-        .groupby(g, dropna=False, as_index=False)[v].sum()
+        .groupby(g, dropna=False, as_index=False)[v]
+        .sum()
         .rename(columns={g: "section", v: "metric_now"})
     )
 
     if df_now.empty:
-        return pd.DataFrame(columns=["section", "metric_now", "metric_last",
-                                     "metric_Δ_abs", "metric_Δ_pct", "metric_Δ_impact_pct"])
+        return pd.DataFrame(
+            columns=[
+                "section",
+                "metric_now",
+                "metric_last",
+                "metric_Δ_abs",
+                "metric_Δ_pct",
+                "metric_Δ_impact_pct",
+            ]
+        )
 
     # предыдущие дни
     last_days = [now - timedelta(days=i) for i in range(1, cfg.window_days + 1)]
     df_last = (
         work[work[t].isin(last_days)]
-        .groupby(g, dropna=False, as_index=False)[v].mean()
+        .groupby(g, dropna=False, as_index=False)[v]
+        .mean()
         .rename(columns={g: "section", v: "metric_last"})
     )
 
@@ -77,11 +83,16 @@ def _compute_impact_for_date(
 
     # дельты
     out["metric_Δ_abs"] = out["metric_now"] - out["metric_last"]
+
     def _safe_pct(now_val, last_val):
         if last_val == 0:
             return 0.0
         return (now_val / last_val - 1.0) * 100.0
-    out["metric_Δ_pct"] = out.apply(lambda r: _safe_pct(r["metric_now"], r["metric_last"]), axis=1)
+
+    out["metric_Δ_pct"] = out.apply(
+        lambda r: _safe_pct(r["metric_now"], r["metric_last"]),
+        axis=1,
+    )
 
     total_delta = float(out["metric_Δ_abs"].sum())
     denom = abs(total_delta) if abs(total_delta) > 0 else 1.0
@@ -93,7 +104,7 @@ def _compute_impact_for_date(
 def _build_impact_text(impact_df: pd.DataFrame, top_k: int) -> str:
     """
     Формирует строки в формате:
-    1. <section>: -76,044 (-23.5%), вклад: -45.6% и тд
+    1. <section>: -76,044 (-23.5%), вклад: -45.6%
     """
     if impact_df.empty:
         return ""
@@ -103,15 +114,20 @@ def _build_impact_text(impact_df: pd.DataFrame, top_k: int) -> str:
     if total_delta < 0:
         ordered = impact_df.sort_values("metric_Δ_impact_pct").head(top_k)
     else:
-        ordered = impact_df.sort_values("metric_Δ_impact_pct", ascending=False).head(top_k)
+        ordered = impact_df.sort_values(
+            "metric_Δ_impact_pct", ascending=False
+        ).head(top_k)
 
-    lines = []
+    lines: List[str] = []
     for i, row in enumerate(ordered.itertuples(index=False), 1):
         sect = getattr(row, "section")
         d_abs = getattr(row, "metric_Δ_abs")
         d_pct = getattr(row, "metric_Δ_pct")
         imp = getattr(row, "metric_Δ_impact_pct")
-        line = f"{i}. {sect}: {_fmt_num(d_abs)} ({_fmt_pct(d_pct)}), вклад: {_fmt_pct(imp)}"
+        line = (
+            f"{i}. {sect}: {_fmt_num(d_abs)} ({_fmt_pct(d_pct)}), "
+            f"вклад: {_fmt_pct(imp)}"
+        )
         lines.append(line)
 
     return "\n".join(lines)
@@ -120,7 +136,7 @@ def _build_impact_text(impact_df: pd.DataFrame, top_k: int) -> str:
 def _one_date_pipeline(
     now: pd.Timestamp,
     df_impact: pd.DataFrame,
-    cfg: ImpactConfig
+    cfg: ImpactConfig,
 ) -> Tuple[pd.Timestamp, str]:
     """Вычисляет impact_text для одной даты"""
     imp = _compute_impact_for_date(df_impact, now, cfg)
@@ -138,10 +154,7 @@ def attach_impact_text(
     output_col: str = "impact_text",
 ) -> pd.DataFrame:
     """
-    Добавляет в df_anomaly столбец output_col с текстовой декомпозицией метрики
-    по Top-N факторам для дат, где anomaly_final == 1
-
-    df_impact должен иметь: time_at, group_col, metric_value (настраивается через ImpactConfig)
+    Базовая функция: добавляет одну колонку импакта.
     """
     cfg = config or ImpactConfig()
 
@@ -149,25 +162,86 @@ def attach_impact_text(
     a[time_col_anom] = pd.to_datetime(a[time_col_anom])
 
     # Даты с аномалиями
-    anomaly_dates = a.loc[a[anomaly_flag_col] == 1, time_col_anom].dropna().drop_duplicates().tolist()
+    anomaly_dates = (
+        a.loc[a[anomaly_flag_col] == 1, time_col_anom]
+        .dropna()
+        .drop_duplicates()
+        .tolist()
+    )
     if not anomaly_dates:
         a[output_col] = ""
         return a
 
-    # Параллельный/последовательный расчёт
-    results = {}
-    if cfg.parallel:
-        max_workers = cfg.max_workers or min(len(anomaly_dates), (os.cpu_count() or 4))
-        with ThreadPoolExecutor(max_workers=max_workers) as ex:
-            futs = {ex.submit(_one_date_pipeline, d, df_impact, cfg): d for d in anomaly_dates}
-            for fut in as_completed(futs):
-                dt, text = fut.result()
-                results[pd.Timestamp(dt)] = text
-    else:
-        for d in anomaly_dates:
-            dt, text = _one_date_pipeline(pd.Timestamp(d), df_impact, cfg)
-            results[dt] = text
+    results: dict[pd.Timestamp, str] = {}
+    for d in anomaly_dates:
+        dt, text = _one_date_pipeline(pd.Timestamp(d), df_impact, cfg)
+        results[dt] = text
 
     a[output_col] = a[time_col_anom].map(results).fillna("")
 
     return a
+
+
+def attach_multi_impact(
+    df_anomaly: pd.DataFrame,
+    df: pd.DataFrame,
+    *,
+    dims: Sequence[str],
+    time_col: str = "time_at",
+    metric_col: str = "metric_value",
+    total_value: str = "total",
+    time_col_anom: str = "time_at",
+    anomaly_flag_col: str = "anomaly_final",
+    window_days: int = 5,
+    top_k: int = 3,
+    exclude_groups: Tuple[str, ...] = ("total", "-"),
+    prefix: str = "impact_text_",
+) -> pd.DataFrame:
+    """
+    Принимает:
+      - df_anomaly  — датафрейм с аномалиями (time_col_anom, anomaly_flag_col)
+      - df          — полный датафрейм с измерениями
+      - dims        — список измерений, по которым считать вклад (["country", "platform", ...])
+
+    Логика по каждому измерению dim:
+      - берём строки, где:
+          dim != total_value
+          все остальные измерения из dims == total_value
+      - group_col = dim
+      - считаем импакты
+      - добавляем колонку prefix + dim  (например impact_text_country)
+    """
+    result = df_anomaly.copy()
+
+    for dim in dims:
+        other_dims = [d for d in dims if d != dim]
+
+        mask = df[dim] != total_value
+        for od in other_dims:
+            mask &= df[od] == total_value
+
+        df_impact_dim = (
+            df.loc[mask, [time_col, dim, metric_col]]
+            .rename(columns={dim: "group_col"})
+        )
+
+        cfg = ImpactConfig(
+            time_col=time_col,
+            group_col="group_col",
+            metric_col=metric_col,
+            window_days=window_days,
+            top_k=top_k,
+            exclude_groups=exclude_groups,
+        )
+
+        col_name = f"{prefix}{dim}"
+        result = attach_impact_text(
+            df_anomaly=result,
+            df_impact=df_impact_dim,
+            config=cfg,
+            time_col_anom=time_col_anom,
+            anomaly_flag_col=anomaly_flag_col,
+            output_col=col_name,
+        )
+
+    return result
