@@ -5,7 +5,7 @@ import re
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Optional, Callable, Tuple, List
+from typing import Optional, Callable, Tuple, List, Literal
 
 import numpy as np
 import pandas as pd
@@ -13,6 +13,7 @@ import requests
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import matplotlib.ticker as mticker
+
 
 @dataclass
 class AlertConfig_tg:
@@ -23,6 +24,7 @@ class AlertConfig_tg:
     metric_name_col: str = "metric_name"
     granularity_col: str = "granularity"
 
+    # импакт-блоки
     impact_blocks: Optional[List[Tuple[str, str]]] = None
 
     # прогноз
@@ -33,6 +35,44 @@ class AlertConfig_tg:
     # график
     plot_window_points: int = 36
     figure_size: Tuple[int, int] = (15, 6)
+
+    # форматирование чисел
+    value_decimals: int = 2
+    pct_decimals: int = 0
+    forecast_decimals: Optional[int] = None
+    diff_decimals: Optional[int] = None
+
+    # ось X
+    x_major_freq: Optional[int] = 1
+    x_major_unit: str = "day"      # day / hour / week / month
+    x_minor_freq: Optional[int] = None
+    x_minor_unit: Optional[str] = None
+    x_date_format_daily: str = "%Y-%m-%d"
+    x_date_format_hourly: str = "%Y-%m-%d %H:%M"
+    x_tick_rotation: int = 90
+
+    # ось Y
+    y_min: Optional[float] = 0
+    y_max: Optional[float] = None
+    y_tick_step: Optional[float] = None
+    y_label_decimals: int = 2
+    y_use_compact_unit: bool = True
+
+    # подписи осей
+    x_label: str = "Дата"
+    y_label: str = "Значение"
+
+    # заголовок
+    plot_title_prefix: str = "Аномалии"
+
+    # сетка
+    grid_enabled: bool = True
+    grid_linestyle: str = "--"
+    grid_linewidth: float = 0.5
+    grid_alpha: float = 0.7
+
+    # легенда
+    legend_loc: str = "upper left"
 
     # подписи срезов
     slice1_name: Optional[str] = "Срез1"
@@ -46,29 +86,63 @@ class AlertConfig_tg:
     # только если аномалия
     anomaly_only: bool = True
 
+    # шаблоны сообщения
+    message_style: Literal["standard", "extended_inline", "analytic_blocks"] = "standard"
 
-def _fmt_compact(n: float) -> str:
-    if n is None or (isinstance(n, float) and (math.isnan(n) or math.isinf(n))):
+    # сравнение со средним за N дней
+    show_avg_compare: bool = False
+    avg_compare_days: int = 7
+    avg_compare_label: str = "vs avg"
+
+    # разделитель между импакт-блоками
+    impact_join_separator: str = "\n\n"
+
+
+def _is_bad_number(x) -> bool:
+    try:
+        return x is None or pd.isna(x) or np.isinf(x)
+    except Exception:
+        return True
+
+
+def _fmt_num(x: Optional[float], decimals: int = 2) -> str:
+    if _is_bad_number(x):
         return "н/д"
-    sgn = "-" if n < 0 else ""
+    try:
+        s = f"{float(x):,.{decimals}f}"
+        return s.replace(",", " ").replace(".", ",")
+    except Exception:
+        return "н/д"
+
+
+def _fmt_compact(n: float, decimals: int = 2) -> str:
+    if _is_bad_number(n):
+        return "н/д"
+
+    sgn = "-" if float(n) < 0 else ""
     n = abs(float(n))
+
     if n >= 1_000_000_000:
-        return f"{sgn}{n/1_000_000_000:.1f}".replace(".", ",") + "B"
+        return f"{sgn}{n/1_000_000_000:.{decimals}f}".replace(".", ",") + "B"
     if n >= 1_000_000:
-        return f"{sgn}{n/1_000_000:.1f}".replace(".", ",") + "M"
+        return f"{sgn}{n/1_000_000:.{decimals}f}".replace(".", ",") + "M"
     if n >= 1_000:
-        return f"{sgn}{n/1_000:.1f}".replace(".", ",") + "K"
-    return f"{sgn}{n:,.0f}".replace(",", " ")
+        return f"{sgn}{n/1_000:.{decimals}f}".replace(".", ",") + "K"
+
+    return _fmt_num(float(f"{sgn}{n}"), decimals=decimals)
 
 
-def _fmt_pct(x: Optional[float]) -> str:
-    return "н/д" if (x is None or (isinstance(x, float) and (math.isnan(x) or math.isinf(x)))) else f"{x:.1f}%"
+def _fmt_pct(x: Optional[float], decimals: int = 0) -> str:
+    if _is_bad_number(x):
+        return "н/д"
+    return f"{float(x):.{decimals}f}%".replace(".", ",")
 
 
 def _calc_vs(prev_val: Optional[float], now_val: float) -> Optional[float]:
     if prev_val is None or prev_val == 0:
         return None
     return (now_val / prev_val - 1.0) * 100.0
+
 
 def _y_scale_and_unit(mx: float) -> Tuple[float, str]:
     if mx >= 1e9:
@@ -80,12 +154,31 @@ def _y_scale_and_unit(mx: float) -> Tuple[float, str]:
     return 1.0, ""
 
 
+def _make_date_locator(unit: Optional[str], freq: Optional[int]):
+    if unit is None or freq is None:
+        return None
+
+    unit = unit.lower()
+    if unit == "hour":
+        return mdates.HourLocator(interval=freq)
+    if unit == "day":
+        return mdates.DayLocator(interval=freq)
+    if unit == "week":
+        return mdates.WeekdayLocator(interval=freq)
+    if unit == "month":
+        return mdates.MonthLocator(interval=freq)
+
+    return None
+
+
 def _pick_row_for_now(df: pd.DataFrame, now: datetime, tcol: str) -> pd.DataFrame:
     ts = pd.Timestamp(now)
     df = df.copy()
     df[tcol] = pd.to_datetime(df[tcol], errors="coerce")
+
     if getattr(df[tcol].dt, "tz", None) is not None:
         df[tcol] = df[tcol].dt.tz_convert(None)
+
     if ts.tzinfo is not None:
         ts = ts.tz_convert(None) if hasattr(ts, "tz_convert") else ts.replace(tzinfo=None)
 
@@ -96,6 +189,7 @@ def _pick_row_for_now(df: pd.DataFrame, now: datetime, tcol: str) -> pd.DataFram
     hit = df.loc[df[tcol].dt.normalize() == ts.normalize()]
     if not hit.empty:
         return hit.sort_values(tcol).tail(1)
+
     return pd.DataFrame()
 
 
@@ -104,6 +198,9 @@ def make_plot_image(df: pd.DataFrame, now: pd.Timestamp, metric_name: str, cfg: 
     cols = [c for c in ["ci_upper", "ci_lower", "ci_mean", cfg.anomaly_col] if c in df.columns]
 
     df_fig = df[[t, v, *cols]].sort_values(t).copy()
+    df_fig[t] = pd.to_datetime(df_fig[t], errors="coerce")
+    df_fig = df_fig.dropna(subset=[t])
+
     if len(df_fig) > cfg.plot_window_points:
         df_fig = df_fig.tail(cfg.plot_window_points)
 
@@ -119,26 +216,66 @@ def make_plot_image(df: pd.DataFrame, now: pd.Timestamp, metric_name: str, cfg: 
     if cfg.anomaly_col in df_fig.columns:
         ano = df_fig[df_fig[cfg.anomaly_col] == 1]
         if not ano.empty:
-            drops = ano[ano[v] < ano.get("ci_mean", ano[v])]
-            rises = ano[ano[v] >= ano.get("ci_mean", ano[v])]
+            base_line = ano["ci_mean"] if "ci_mean" in ano.columns else ano[v]
+            drops = ano[ano[v] < base_line]
+            rises = ano[ano[v] >= base_line]
             if not drops.empty:
                 ax.scatter(drops[t], drops[v], label="Аномальное падение", zorder=5, s=80)
             if not rises.empty:
                 ax.scatter(rises[t], rises[v], label="Аномальный рост", zorder=5, s=80)
 
-    ax.set_title(f"Аномалии · {metric_name}", fontsize=14)
-    ax.set_xlabel("Дата", fontsize=12)
-    ax.grid(True, linestyle="--", linewidth=0.5, alpha=0.7)
-    ax.xaxis.set_major_locator(mdates.DayLocator(interval=1))
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
-    fig.autofmt_xdate(rotation=90, ha="right")
+    ax.set_title(f"{cfg.plot_title_prefix} · {metric_name}", fontsize=14)
+    ax.set_xlabel(cfg.x_label, fontsize=12)
 
-    y_max = float(df_fig[v].max()) if not df_fig.empty else 1.0
-    scale, unit = _y_scale_and_unit(y_max)
-    ax.set_ylabel(f"Значение {unit}".strip(), fontsize=12)
-    ax.set_ylim(bottom=0)
-    ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x/scale:,.2f}".replace(",", " ")))
-    ax.legend(loc="upper left", framealpha=0.9)
+    y_max_data = float(df_fig[v].max()) if not df_fig.empty else 1.0
+    y_min_data = float(df_fig[v].min()) if not df_fig.empty else 0.0
+
+    if cfg.y_use_compact_unit:
+        scale, unit = _y_scale_and_unit(max(abs(y_max_data), abs(y_min_data)))
+    else:
+        scale, unit = 1.0, ""
+
+    ax.set_ylabel(f"{cfg.y_label} {unit}".strip(), fontsize=12)
+
+    if cfg.y_min is not None or cfg.y_max is not None:
+        ax.set_ylim(
+            bottom=cfg.y_min if cfg.y_min is not None else None,
+            top=cfg.y_max if cfg.y_max is not None else None,
+        )
+
+    if cfg.y_tick_step is not None:
+        ax.yaxis.set_major_locator(mticker.MultipleLocator(base=cfg.y_tick_step))
+
+    ax.yaxis.set_major_formatter(
+        mticker.FuncFormatter(lambda x, _: f"{x/scale:,.{cfg.y_label_decimals}f}".replace(",", " "))
+    )
+
+    gran = "daily"
+    if cfg.granularity_col in df.columns and not df[cfg.granularity_col].dropna().empty:
+        gran = str(df[cfg.granularity_col].dropna().iloc[-1]).lower()
+
+    major_locator = _make_date_locator(cfg.x_major_unit, cfg.x_major_freq)
+    if major_locator is not None:
+        ax.xaxis.set_major_locator(major_locator)
+
+    date_fmt = cfg.x_date_format_hourly if gran == "hourly" else cfg.x_date_format_daily
+    ax.xaxis.set_major_formatter(mdates.DateFormatter(date_fmt))
+
+    minor_locator = _make_date_locator(cfg.x_minor_unit, cfg.x_minor_freq)
+    if minor_locator is not None:
+        ax.xaxis.set_minor_locator(minor_locator)
+
+    fig.autofmt_xdate(rotation=cfg.x_tick_rotation, ha="right")
+
+    if cfg.grid_enabled:
+        ax.grid(
+            True,
+            linestyle=cfg.grid_linestyle,
+            linewidth=cfg.grid_linewidth,
+            alpha=cfg.grid_alpha,
+        )
+
+    ax.legend(loc=cfg.legend_loc, framealpha=0.9)
     plt.tight_layout()
 
     tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
@@ -146,19 +283,53 @@ def make_plot_image(df: pd.DataFrame, now: pd.Timestamp, metric_name: str, cfg: 
     plt.close(fig)
     return tmp.name
 
+
 def _find_prev_values(df: pd.DataFrame, now: pd.Timestamp, cfg: AlertConfig_tg) -> Tuple[Optional[float], Optional[float]]:
     t, v, gcol = cfg.time_col, cfg.value_col, cfg.granularity_col
     gran = df.loc[df[t] == now, gcol].iloc[0] if gcol in df.columns and (df[t] == now).any() else "daily"
+
     if gran == "hourly":
         prev_1 = now - timedelta(hours=24)
-        prev_7 = now - timedelta(hours=24*7)
+        prev_7 = now - timedelta(hours=24 * 7)
     else:
         prev_1 = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
         prev_7 = (now - timedelta(days=7)).replace(hour=0, minute=0, second=0, microsecond=0)
+
     v1 = df.loc[df[t] == prev_1, v]
     v7 = df.loc[df[t] == prev_7, v]
-    return (float(v1.iloc[0]) if not v1.empty else None,
-            float(v7.iloc[0]) if not v7.empty else None)
+    return (
+        float(v1.iloc[0]) if not v1.empty else None,
+        float(v7.iloc[0]) if not v7.empty else None,
+    )
+
+
+def _find_mean_for_prev_n_days(
+    df: pd.DataFrame,
+    now: pd.Timestamp,
+    cfg: AlertConfig_tg,
+) -> Optional[float]:
+    t, v, gcol = cfg.time_col, cfg.value_col, cfg.granularity_col
+
+    work = df[[t, v] + ([gcol] if gcol in df.columns else [])].copy()
+    work[t] = pd.to_datetime(work[t], errors="coerce")
+    work = work.dropna(subset=[t])
+
+    gran = "daily"
+    hit_now = work.loc[work[t] == now]
+    if gcol in work.columns and not hit_now.empty:
+        gran = str(hit_now[gcol].iloc[0]).lower()
+
+    if gran == "hourly":
+        start_ts = now - timedelta(hours=cfg.avg_compare_days * 24)
+        mask = (work[t] < now) & (work[t] >= start_ts)
+    else:
+        start_ts = now.normalize() - timedelta(days=cfg.avg_compare_days)
+        mask = (work[t] < now.normalize()) & (work[t] >= start_ts)
+
+    vals = pd.to_numeric(work.loc[mask, v], errors="coerce").dropna()
+    if vals.empty:
+        return None
+    return float(vals.mean())
 
 
 def _resolve_forecast_from_row(row: pd.Series, cfg: AlertConfig_tg) -> Optional[float]:
@@ -181,36 +352,86 @@ def _resolve_forecast_from_row(row: pd.Series, cfg: AlertConfig_tg) -> Optional[
                 val = float(str(row[c]).replace(" ", "").replace(",", ""))
                 wt = float(row[w])
                 if pd.notna(val) and pd.notna(wt):
-                    parts.append(val); weights.append(wt)
+                    parts.append(val)
+                    weights.append(wt)
             except Exception:
                 continue
         if parts and sum(weights) != 0:
             wsum = sum(weights)
             return float(sum(p * (w / wsum) for p, w in zip(parts, weights)))
+
     return None
+
+
+def _render_impact_blocks(alert_row: pd.Series, cfg: AlertConfig_tg) -> str:
+    if not cfg.impact_blocks:
+        return ""
+
+    rendered = []
+    for heading, col in cfg.impact_blocks:
+        if col in alert_row.index:
+            txt = str(alert_row.get(col) or "").strip()
+            if txt:
+                rendered.append(f"{heading}\n{txt}")
+
+    return cfg.impact_join_separator.join(rendered)
+
+
+def _build_main_metrics_line(
+    val_now: float,
+    vs_last_day: Optional[float],
+    vs_last_week: Optional[float],
+    vs_avg_n_days: Optional[float],
+    forecast_val: Optional[float],
+    diff_val: Optional[float],
+    cfg: AlertConfig_tg,
+) -> str:
+    forecast_decimals = cfg.forecast_decimals if cfg.forecast_decimals is not None else cfg.value_decimals
+    diff_decimals = cfg.diff_decimals if cfg.diff_decimals is not None else cfg.value_decimals
+
+    comps = [
+        f"DoD: {_fmt_pct(vs_last_day, cfg.pct_decimals)}",
+        f"WoW: {_fmt_pct(vs_last_week, cfg.pct_decimals)}",
+    ]
+
+    if cfg.show_avg_compare:
+        comps.append(f"{cfg.avg_compare_label}: {_fmt_pct(vs_avg_n_days, cfg.pct_decimals)}")
+
+    line = f"Значение: <b>{_fmt_compact(val_now, cfg.value_decimals)}</b> ({', '.join(comps)})\n"
+
+    if forecast_val is not None:
+        line += f"Прогноз: {_fmt_compact(forecast_val, forecast_decimals)} (diff: {_fmt_compact(diff_val, diff_decimals)})"
+    else:
+        line += "Прогноз: н/д"
+
+    return line
 
 
 def build_caption(alert_row: pd.Series, cfg: AlertConfig_tg) -> str:
     now = pd.to_datetime(alert_row[cfg.time_col])
     metric_name = str(alert_row.get(cfg.metric_name_col, "metric"))
-    val_now = float(str(alert_row[cfg.value_col]).replace(" ", "").replace(",", "")) \
-        if isinstance(alert_row[cfg.value_col], str) else float(alert_row[cfg.value_col])
+
+    raw_val_now = alert_row[cfg.value_col]
+    val_now = float(str(raw_val_now).replace(" ", "").replace(",", "")) if isinstance(raw_val_now, str) else float(raw_val_now)
 
     ci_mean = alert_row.get("ci_mean", np.nan)
     try:
         ci_mean = float(str(ci_mean).replace(" ", "").replace(",", "")) if isinstance(ci_mean, str) else float(ci_mean)
     except Exception:
         ci_mean = np.nan
+
     sign = "🔴 Падение" if (not np.isnan(ci_mean) and val_now < ci_mean) else "🟢 Рост"
 
     vs_last_day = alert_row.get("vs_last_day", None)
     vs_last_week = alert_row.get("vs_last_week", None)
+    vs_avg_n_days = alert_row.get("vs_avg_n_days", None)
 
     forecast_val = _resolve_forecast_from_row(alert_row, cfg)
     diff_val = None if (forecast_val is None) else (val_now - forecast_val)
 
     gran = alert_row.get(cfg.granularity_col, "daily")
     dt_fmt = "%Y-%m-%d %H:%M" if gran == "hourly" else "%Y-%m-%d"
+
     header = f"{sign} | {now:{dt_fmt}} | <b>{metric_name}</b>\n\n"
 
     slice_line = ""
@@ -221,30 +442,65 @@ def build_caption(alert_row: pd.Series, cfg: AlertConfig_tg) -> str:
     if slice_line:
         slice_line = "Срез: " + slice_line + "\n\n"
 
-    body_main = f"Значение: <b>{_fmt_compact(val_now)}</b> (DoD: {_fmt_pct(vs_last_day)}, WoW: {_fmt_pct(vs_last_week)})\n"
-    if forecast_val is not None:
-        body_main += f"Прогноз: {_fmt_compact(forecast_val)} (diff: {_fmt_compact(diff_val)})\n\n"
-    else:
-        body_main += "Прогноз: н/д\n\n"
+    main_line = _build_main_metrics_line(
+        val_now=val_now,
+        vs_last_day=vs_last_day,
+        vs_last_week=vs_last_week,
+        vs_avg_n_days=vs_avg_n_days,
+        forecast_val=forecast_val,
+        diff_val=diff_val,
+        cfg=cfg,
+    )
 
-    impact_text = ""
-    if cfg.impact_blocks:
-        for heading, col in cfg.impact_blocks:
-            if col in alert_row.index:
-                txt = str(alert_row.get(col) or "").strip()
-                if txt:
-                    if impact_text:
-                        impact_text += "\n"
-                    impact_text += f"{heading}\n{txt}\n"
+    impact_text = _render_impact_blocks(alert_row, cfg)
 
     links_block = ""
     if cfg.links:
         for title, url in cfg.links:
             links_block += f'\n🔎 <a href="{url}">{title}</a>'
 
-    caption = header + slice_line + body_main + impact_text + links_block
-    caption = re.sub(r"(<)\s*(\d+)", r"&lt; \2", caption) #TODO: убрать костыль в разметк
-    return caption
+    if cfg.message_style == "standard":
+        body = main_line + "\n\n"
+        if impact_text:
+            body += impact_text + "\n"
+        caption = header + slice_line + body + links_block
+        return re.sub(r"(<)\s*(\d+)", r"&lt; \2", caption)
+
+    if cfg.message_style == "extended_inline":
+        body = main_line + "\n\n"
+        if impact_text:
+            body += impact_text + "\n"
+        caption = header + slice_line + body + links_block
+        return re.sub(r"(<)\s*(\d+)", r"&lt; \2", caption)
+
+    if cfg.message_style == "analytic_blocks":
+        fact_block = (
+            f"<b>Статус:</b> {sign}\n"
+            f"<b>Дата:</b> {now:{dt_fmt}}\n"
+            f"<b>Метрика:</b> {metric_name}\n\n"
+            f"<b>Факт:</b> {_fmt_compact(val_now, cfg.value_decimals)}\n"
+            f"<b>DoD:</b> {_fmt_pct(vs_last_day, cfg.pct_decimals)}\n"
+            f"<b>WoW:</b> {_fmt_pct(vs_last_week, cfg.pct_decimals)}\n"
+        )
+
+        if cfg.show_avg_compare:
+            fact_block += f"<b>{cfg.avg_compare_label}:</b> {_fmt_pct(vs_avg_n_days, cfg.pct_decimals)}\n"
+
+        if forecast_val is not None:
+            fact_block += (
+                f"<b>Прогноз:</b> {_fmt_compact(forecast_val, cfg.value_decimals)}\n"
+                f"<b>Отклонение от прогноза:</b> {_fmt_compact(diff_val, cfg.value_decimals)}\n\n"
+            )
+        else:
+            fact_block += "<b>Прогноз:</b> н/д\n\n"
+
+        factors_block = f"<b>Ключевые факторы:</b>\n{impact_text}\n" if impact_text else ""
+        caption = fact_block + slice_line + factors_block + links_block
+        return re.sub(r"(<)\s*(\d+)", r"&lt; \2", caption)
+
+    caption = header + slice_line + main_line + "\n\n" + impact_text + links_block
+    return re.sub(r"(<)\s*(\d+)", r"&lt; \2", caption)
+
 
 def send_telegram_message(
     token: str,
@@ -253,8 +509,8 @@ def send_telegram_message(
     caption_html: str,
 ) -> dict:
     """
-    Отправляет сообщение в Telegram Bot API
-    Если image_path=None — sendMessage, иначе sendPhoto
+    Отправляет сообщение в Telegram Bot API.
+    Если image_path=None — sendMessage, иначе sendPhoto.
     """
     base = f"https://api.telegram.org/bot{token}"
     params = {"chat_id": chat_id, "parse_mode": "HTML", "disable_web_page_preview": True}
@@ -273,7 +529,12 @@ def send_telegram_message(
     try:
         return resp.json()
     except Exception:
-        return {"ok": False, "status_code": getattr(resp, "status_code", None), "text": getattr(resp, "text", "")}
+        return {
+            "ok": False,
+            "status_code": getattr(resp, "status_code", None),
+            "text": getattr(resp, "text", ""),
+        }
+
 
 def send_alert_for_date_tg(
     df_final: pd.DataFrame,
@@ -287,11 +548,9 @@ def send_alert_for_date_tg(
     also_return: bool = False,
 ) -> Optional[dict]:
     """
-    Берёт df_final (уже с прогнозами/импактами), находит строку на дату `now`,
-    проверяет anomaly_final == 1 (если cfg.anomaly_only=True), строит график, собирает текст и отправляет
-
-    Возвращает payload Telegram (или dict с caption+image_path при also_return=True),
-    либо None, если на дату нет строки/аномалии
+    Берёт df_final, находит строку на дату now,
+    проверяет anomaly_final == 1 (если cfg.anomaly_only=True),
+    строит график, собирает текст и отправляет.
     """
     cfg = cfg or AlertConfig_tg()
     t, v, a, mcol, gcol = cfg.time_col, cfg.value_col, cfg.anomaly_col, cfg.metric_name_col, cfg.granularity_col
@@ -302,8 +561,13 @@ def send_alert_for_date_tg(
     row = _pick_row_for_now(df, now, t)
     if row.empty:
         if also_return:
-            return {"skipped": True, "reason": "no_row_for_now",
-                    "now": str(now), "min_ts": str(df[t].min()), "max_ts": str(df[t].max())}
+            return {
+                "skipped": True,
+                "reason": "no_row_for_now",
+                "now": str(now),
+                "min_ts": str(df[t].min()),
+                "max_ts": str(df[t].max()),
+            }
         return None
 
     if cfg.anomaly_only and (pd.isna(row.iloc[0].get(a, np.nan)) or int(row.iloc[0][a]) != 1):
@@ -313,11 +577,19 @@ def send_alert_for_date_tg(
 
     alert_row = row.iloc[0]
 
-    if ("vs_last_day" not in df.columns) or ("vs_last_week" not in df.columns) or \
-       (pd.isna(alert_row.get("vs_last_day", np.nan)) and pd.isna(alert_row.get("vs_last_week", np.nan))):
+    if ("vs_last_day" not in df.columns) or ("vs_last_week" not in df.columns) or (
+        pd.isna(alert_row.get("vs_last_day", np.nan)) and pd.isna(alert_row.get("vs_last_week", np.nan))
+    ):
         prev1, prev7 = _find_prev_values(df, pd.Timestamp(now), cfg)
         df.loc[df[t] == pd.Timestamp(now), "vs_last_day"] = _calc_vs(prev1, float(alert_row[v]))
         df.loc[df[t] == pd.Timestamp(now), "vs_last_week"] = _calc_vs(prev7, float(alert_row[v]))
+        alert_row = df.loc[df[t] == pd.Timestamp(now)].iloc[0]
+
+    if cfg.show_avg_compare and (
+        ("vs_avg_n_days" not in df.columns) or pd.isna(alert_row.get("vs_avg_n_days", np.nan))
+    ):
+        avg_val = _find_mean_for_prev_n_days(df, pd.Timestamp(now), cfg)
+        df.loc[df[t] == pd.Timestamp(now), "vs_avg_n_days"] = _calc_vs(avg_val, float(alert_row[v]))
         alert_row = df.loc[df[t] == pd.Timestamp(now)].iloc[0]
 
     metric_name_effective = metric_name or str(alert_row.get(mcol, "metric"))

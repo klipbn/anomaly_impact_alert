@@ -16,19 +16,26 @@ class ImpactConfig:
     window_days: int = 5
     top_k: int = 3
     exclude_groups: Tuple[str, ...] = ("total", "-")  # кого выкидывать из групп
+    decimals_value: int = 2
+    decimals_pct: int = 0
 
 
-def _fmt_num(x: float) -> str:
+def _fmt_num(x: float, decimals: int = 2) -> str:
     try:
-        return f"{x:,.0f}"
+        if pd.isna(x) or np.isinf(x):
+            x = 0.0
+        return f"{x:,.{decimals}f}"
     except Exception:
-        return str(int(round(x)))
+        try:
+            return f"{float(x):,.{decimals}f}"
+        except Exception:
+            return str(x)
 
 
-def _fmt_pct(x: float) -> str:
-    if np.isnan(x) or np.isinf(x):
-        return "0.0%"
-    return f"{x:.1f}%"
+def _fmt_pct(x: float, decimals: int = 0) -> str:
+    if pd.isna(x) or np.isinf(x):
+        return f"{0:.{decimals}f}%"
+    return f"{x:.{decimals}f}%"
 
 
 def _compute_impact_for_date(
@@ -46,7 +53,6 @@ def _compute_impact_for_date(
     work[t] = pd.to_datetime(work[t])
     work[g] = work[g].astype(str)
 
-    # исключаем Total, '-' (регистронезависимо)
     mask_excl = work[g].str.lower().isin([x.lower() for x in cfg.exclude_groups])
     work = work.loc[~mask_excl]
 
@@ -69,7 +75,6 @@ def _compute_impact_for_date(
             ]
         )
 
-    # предыдущие дни
     last_days = [now - timedelta(days=i) for i in range(1, cfg.window_days + 1)]
     df_last = (
         work[work[t].isin(last_days)]
@@ -78,10 +83,8 @@ def _compute_impact_for_date(
         .rename(columns={g: "section", v: "metric_last"})
     )
 
-    # объединяем
     out = pd.merge(df_now, df_last, on="section", how="outer").fillna(0.0)
 
-    # дельты
     out["metric_Δ_abs"] = out["metric_now"] - out["metric_last"]
 
     def _safe_pct(now_val, last_val):
@@ -101,10 +104,15 @@ def _compute_impact_for_date(
     return out
 
 
-def _build_impact_text(impact_df: pd.DataFrame, top_k: int) -> str:
+def _build_impact_text(
+    impact_df: pd.DataFrame,
+    top_k: int,
+    decimals_value: int = 2,
+    decimals_pct: int = 0,
+) -> str:
     """
     Формирует строки в формате:
-    1. <section>: -76,044 (-23.5%), вклад: -45.6%
+    1. <section>: -76,044.12 (-24%), вклад: -46%
     """
     if impact_df.empty:
         return ""
@@ -125,8 +133,9 @@ def _build_impact_text(impact_df: pd.DataFrame, top_k: int) -> str:
         d_pct = getattr(row, "metric_Δ_pct")
         imp = getattr(row, "metric_Δ_impact_pct")
         line = (
-            f"{i}. {sect}: {_fmt_num(d_abs)} ({_fmt_pct(d_pct)}), "
-            f"вклад: {_fmt_pct(imp)}"
+            f"{i}. {sect}: {_fmt_num(d_abs, decimals_value)} "
+            f"({_fmt_pct(d_pct, decimals_pct)}), "
+            f"вклад: {_fmt_pct(imp, decimals_pct)}"
         )
         lines.append(line)
 
@@ -140,7 +149,12 @@ def _one_date_pipeline(
 ) -> Tuple[pd.Timestamp, str]:
     """Вычисляет impact_text для одной даты"""
     imp = _compute_impact_for_date(df_impact, now, cfg)
-    text = _build_impact_text(imp, cfg.top_k)
+    text = _build_impact_text(
+        imp,
+        cfg.top_k,
+        cfg.decimals_value,
+        cfg.decimals_pct,
+    )
     return now, text
 
 
@@ -161,7 +175,6 @@ def attach_impact_text(
     a = df_anomaly.copy()
     a[time_col_anom] = pd.to_datetime(a[time_col_anom])
 
-    # Даты с аномалиями
     anomaly_dates = (
         a.loc[a[anomaly_flag_col] == 1, time_col_anom]
         .dropna()
@@ -196,6 +209,8 @@ def attach_multi_impact(
     top_k: int = 3,
     exclude_groups: Tuple[str, ...] = ("total", "-"),
     prefix: str = "impact_text_",
+    decimals_value: int = 2,
+    decimals_pct: int = 0,
 ) -> pd.DataFrame:
     """
     Принимает:
@@ -232,6 +247,8 @@ def attach_multi_impact(
             window_days=window_days,
             top_k=top_k,
             exclude_groups=exclude_groups,
+            decimals_value=decimals_value,
+            decimals_pct=decimals_pct,
         )
 
         col_name = f"{prefix}{dim}"
