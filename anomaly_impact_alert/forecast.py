@@ -88,7 +88,7 @@ def _winsorize_by_seasonal_median(df: pd.DataFrame, granularity: str, k: float) 
     work = df.copy()
     idx = _seasonal_index(work, granularity)
     work["__bin"] = idx
-    y = work["y"].values
+    y = work["y"].to_numpy(copy=True)
 
     for b in np.unique(idx):
         mask = work["__bin"] == b
