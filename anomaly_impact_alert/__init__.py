@@ -1,4 +1,9 @@
-from .anomaly_detector import AnomalyParams, analyze_latest_point, columns_true
+from .anomaly_detector import (
+    AnomalyParams,
+    analyze_latest_point,
+    columns_true,
+    month_position_category,
+)
 from .impact_explainer import ImpactConfig, attach_impact_text, attach_multi_impact
 from .forecast import BFConfig, forecast_values_for_targets_better
 from .alert_bot import AlertConfig, send_alert_for_date
@@ -8,6 +13,7 @@ __all__ = [
     "AnomalyParams",
     "analyze_latest_point",
     "columns_true",
+    "month_position_category",
     "ImpactConfig",
     "attach_impact_text",
     "attach_multi_impact",

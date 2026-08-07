@@ -19,6 +19,18 @@ columns_true: List[str] = [
 ]
 
 
+def month_position_category(value: pd.Timestamp) -> int:
+    """Категория позиции даты: 1/2, предпоследний/последний или обычный день."""
+    date = pd.Timestamp(value)
+    if date.day in (1, 2):
+        return int(date.day)
+    if date.day == date.days_in_month - 1:
+        return -2
+    if date.day == date.days_in_month:
+        return -1
+    return 0
+
+
 # =========================
 # Параметры тюнинга (Config)
 # =========================
@@ -50,6 +62,9 @@ class AnomalyParams:
     ci_min_points_same_bin_daily: int = 4
     # насколько длинным делать хвост bin'а (min_points_same_bin * этот фактор)
     ci_bin_tail_factor: int = 8
+    # Для daily дополнительно учитываем позицию даты в месяце. Значения 1/2 и
+    # последние 1/2 дня месяца выделяются в отдельные календарные корзины.
+    ci_use_month_position: bool = True
     # сглаживание оценок σ (MAD) по времени; 0 = без сглаживания
     ci_smooth_mad_hourly: int = 0
     ci_smooth_mad_daily: int = 0
@@ -436,6 +451,7 @@ def calculate_anomalies(
     # перед расчётами
     df["hour"] = df[time_col].dt.hour
     df["dow"] = df[time_col].dt.dayofweek  # 0..6
+    df["month_position"] = df[time_col].map(month_position_category)
 
     def compute_ci_and_z_mad(
         row,
@@ -454,23 +470,54 @@ def calculate_anomalies(
         base_time_mask = df_hist[time_col] < row[time_col]
 
         history = None
+        required_bin_points = min_points_same_bin
+        if (
+            freq == "daily"
+            and resolved.ci_use_month_position
+            and row["month_position"]
+        ):
+            # При daily-истории в 90 дней обычно доступны только три
+            # предыдущие даты каждой специальной календарной категории.
+            required_bin_points = min(min_points_same_bin, 3)
 
         if use_same_bin:
             if freq == "hourly":
                 bin_mask = (df_hist["hour"] == row["hour"]) & base_time_mask
             elif freq == "daily":
-                bin_mask = (df_hist["dow"] == row["dow"]) & base_time_mask
+                if resolved.ci_use_month_position:
+                    if row["month_position"]:
+                        bin_mask = (
+                            (df_hist["month_position"] == row["month_position"])
+                            & base_time_mask
+                        )
+                    else:
+                        bin_mask = (df_hist["dow"] == row["dow"]) & base_time_mask
+                else:
+                    bin_mask = (df_hist["dow"] == row["dow"]) & base_time_mask
             else:
                 raise ValueError(f"Unsupported freq: {freq}")
 
             hist_bin = (
                 df_hist.loc[bin_mask, [time_col, value_col]]
                 .sort_values(time_col)
-                .tail(min_points_same_bin * bin_tail_factor)
+                .tail(required_bin_points * bin_tail_factor)
             )
 
-            if len(hist_bin) >= min_points_same_bin:
+            if len(hist_bin) >= required_bin_points:
                 history = hist_bin[value_col]
+            elif freq == "daily" and resolved.ci_use_month_position:
+                # Сначала сохраняем прежний seasonal baseline по weekday,
+                # и только затем откатываемся к общему rolling-окну.
+                fallback_bin = (
+                    (df_hist["dow"] == row["dow"]) & base_time_mask
+                )
+                hist_fallback = (
+                    df_hist.loc[fallback_bin, [time_col, value_col]]
+                    .sort_values(time_col)
+                    .tail(required_bin_points * bin_tail_factor)
+                )
+                if len(hist_fallback) >= required_bin_points:
+                    history = hist_fallback[value_col]
 
         # fall-back: обычный rolling хвост
         if history is None:
@@ -653,7 +700,7 @@ def calculate_anomalies(
 
     df = mark_anomalies(df)
 
-    df = df.drop(columns=[c for c in ["hour", "dow"] if c in df.columns])
+    df = df.drop(columns=[c for c in ["hour", "dow", "month_position"] if c in df.columns])
     return df.reset_index()
 
 
