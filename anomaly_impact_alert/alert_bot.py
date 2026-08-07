@@ -478,7 +478,14 @@ def build_caption(alert_row: pd.Series, cfg: AlertConfig) -> str:
     except Exception:
         ci_mean = np.nan
 
-    sign = "🔴 Падение" if (not np.isnan(ci_mean) and val_now < ci_mean) else "🟢 Рост"
+    if np.isnan(ci_mean):
+        sign = "⚪ Аномалия"
+    elif val_now < ci_mean:
+        sign = "🔴 Падение"
+    elif val_now > ci_mean:
+        sign = "🟢 Рост"
+    else:
+        sign = "⚪ Аномалия"
 
     vs_last_day = alert_row.get("vs_last_day", None)
     vs_last_week = alert_row.get("vs_last_week", None)
