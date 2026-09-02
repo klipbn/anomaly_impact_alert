@@ -4,7 +4,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 
-## [0.4.11] — 2026-09-02
+## [0.4.12] — 2026-09-02
+### Fixed
+- Release numbering: the changes below were previously tagged 0.4.11, a
+  version number already occupied on PyPI by the March 2026 build.
+  Released as 0.4.12 instead.
+
 ### Added
 - Calendar-aware daily baseline: the 1st, 2nd, second-to-last and last days of
   a month are now grouped into separate calendar bins
